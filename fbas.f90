@@ -1,0 +1,526 @@
+
+!
+! BASIC language interpreter
+! Written in FORTRAN/90
+!
+
+PROGRAM MAIN
+ IMPLICIT NONE
+
+ ! LEXER
+ 
+ INTEGER :: L,C,I,LE,N
+ CHARACTER :: T
+ CHARACTER(LEN=32) :: S(8192), ID
+
+ ! PARSER/INTERPRETER
+
+ INTEGER, PARAMETER :: MAXVAR = 256
+ INTEGER, PARAMETER :: MAXSP  = 131072
+ INTEGER, PARAMETER :: T_INT = 0
+ INTEGER, PARAMETER :: T_ARR = 1
+
+ CHARACTER(LEN=32)  :: VARNAME(MAXVAR)
+ INTEGER            :: VARVALUE(MAXVAR)
+ INTEGER            :: VARTYPE(MAXVAR)
+ INTEGER            :: NVAR
+ INTEGER            :: STACK(MAXSP)
+ INTEGER            :: STACKTYPE(MAXSP)
+ INTEGER            :: SP
+
+ ! LEXER INITIALISATION
+
+ L=1
+ C=1
+ I=1
+ LE=0
+ N=0
+
+ CALL LOADFILE(5,I,S)
+
+ ! PARSER/INTERPRETER INITIALISATION
+ NVAR = 0
+ VARNAME = ACHAR(0)
+ VARVALUE = 0
+ VARTYPE = 0
+ STACKTYPE = 0
+ STACK = 0
+ SP = 1
+
+ DO
+  CALL STMT()
+  IF (T == ACHAR(0)) EXIT
+ END DO
+
+ !DO I=1, NVAR
+ ! PRINT *,"VAR ",VARNAME(I),VARVALUE(I),VARTYPE(I)
+ !END DO
+ 
+ !DO I=1, SP
+ ! PRINT *,"ELEM", STACK(I),STACKTYPE(I)
+ !END DO
+CONTAINS
+
+! LEXER
+
+SUBROUTINE PEEK()
+ INTEGER :: L2,C2
+ L2=L
+ C2=C
+ CALL NEXT()
+ L=L2
+ C=C2
+END SUBROUTINE PEEK
+
+SUBROUTINE GET(T,L,C,S)
+ INTEGER,INTENT(INOUT) :: L,C
+ CHARACTER,INTENT(INOUT) :: T
+ CHARACTER(LEN=32) :: S(8192)
+ IF (C > LEN_TRIM(S(L))) THEN
+   T = ACHAR(10)
+   RETURN
+ ELSE IF (C > 32) THEN
+  PRINT *, "#!? Line exceeds 32 characters", L, C
+  CALL EXIT(1)
+ END IF
+ T=S(L)(C:C)
+ C=C+1
+END SUBROUTINE GET
+
+RECURSIVE SUBROUTINE UPDATE(T,L,C,S)
+ INTEGER,INTENT(INOUT) :: L,C
+ CHARACTER,INTENT(INOUT) :: T
+ CHARACTER(LEN=32) :: S(8192)
+ CALL GET(T,L,C,S)
+ IF (T==ACHAR(10)) THEN
+  C=1
+  L=L+1
+  CALL UPDATE(T,L,C,S)
+ ELSE IF (T==ACHAR(32)) THEN
+  CALL UPDATE(T,L,C,S)
+ END IF
+END SUBROUTINE UPDATE
+
+SUBROUTINE NUMBER(T,L,C,S,ID,LE)
+ CHARACTER,INTENT(INOUT) :: T
+ INTEGER,INTENT(INOUT):: L,C,LE
+ CHARACTER(LEN=32),INTENT(INOUT) :: ID
+ CHARACTER(LEN=32) :: S(8192)
+ INTEGER :: OLDL, OLDC
+ OLDL=L
+ OLDC=C
+ LE=0
+ ID=ACHAR(0)
+ N=0
+ DO WHILE (T>='0' .AND. T<='9')
+  LE=LE+1
+  ID(LE:LE)=T
+  N=N*10+(ICHAR(T)-48)
+  OLDL=L
+  OLDC=C
+  CALL GET(T,L,C,S)
+ END DO
+ C=OLDC
+ L=OLDL
+ T='0'
+END SUBROUTINE NUMBER
+
+SUBROUTINE IDENTIFIER(T,L,C,S,ID,LE)
+ CHARACTER,INTENT(INOUT) :: T
+ INTEGER,INTENT(INOUT):: L,C,LE
+ CHARACTER(LEN=32),INTENT(INOUT) :: ID
+ CHARACTER(LEN=32) :: S(8192)
+ INTEGER :: OLDL, OLDC
+ OLDL=L
+ OLDC=C
+ LE=0
+ ID=ACHAR(0)
+ DO WHILE (T>='A' .AND. T<='Z')
+  LE=LE+1
+  ID(LE:LE)=T
+  OLDL=L
+  OLDC=C
+  CALL GET(T,L,C,S)
+ END DO
+
+ IF (T==':') THEN
+  RETURN
+ END IF
+ 
+ C=OLDC
+ L=OLDL
+ T='A'
+END SUBROUTINE IDENTIFIER
+
+SUBROUTINE NEXT()
+ CALL UPDATE(T,L,C,S)
+ IF (T>='A' .AND. T <= 'Z') THEN
+  CALL IDENTIFIER(T,L,C,S,ID,LE)
+ ELSE IF (T>='0' .AND. T <= '9') THEN
+  CALL NUMBER(T,L,C,S,ID,LE)
+ END IF
+END SUBROUTINE NEXT
+
+! PARSER // INTERPRETER
+
+SUBROUTINE PUSH(N,T)
+ INTEGER :: N,T
+ IF (SP >= MAXSP) THEN
+  PRINT*,"#!? Stack Overflowed!", L, C
+  CALL EXIT(1)
+ END IF
+ STACK(SP) = N
+ STACKTYPE(SP) = T
+ SP = SP + 1
+END SUBROUTINE PUSH
+
+SUBROUTINE POP(O,T)
+ INTEGER,INTENT(OUT) :: O,T
+ IF (SP == 1) THEN
+  PRINT*,"#!? Stack Underflowed!", L, C
+  CALL EXIT(1)
+ END IF
+ SP = SP - 1
+ O = STACK(SP)
+ T = STACKTYPE(SP)
+END SUBROUTINE POP
+
+SUBROUTINE POPINT(O)
+ INTEGER,INTENT(OUT) :: O
+ INTEGER :: Y
+ CALL POP(O, Y)
+ IF (Y /= T_INT) THEN
+  PRINT*, "#!? expected integer", L, C
+  CALL EXIT(1)
+ ENDIF
+END SUBROUTINE POPINT
+
+SUBROUTINE POPARR(O)
+ INTEGER,INTENT(OUT) :: O
+ INTEGER :: Y
+ CALL POP(O, Y)
+ IF (Y /= T_ARR) THEN
+  PRINT*, "#!? expected integer", L, C
+  CALL EXIT(1)
+ ENDIF
+END SUBROUTINE POPARR
+
+! EXPRESSIONS
+
+! idk
+SUBROUTINE EXPRP()
+ INTEGER :: V, A, B, ITR
+ CALL PEEK()
+ IF (T == ACHAR(0)) THEN
+  RETURN
+ ELSE IF (T == '(') THEN
+  CALL NEXT()
+  CALL EXPR()
+  CALL NEXT()
+  IF (T /= ')') THEN
+   PRINT*, "#!? Invalid access, expected RPAREN (')')", L, C
+   CALL EXIT(1)
+  END IF
+ ELSE IF (T == '0') THEN
+  CALL NEXT()
+  CALL PUSH(N, T_INT)
+ ELSE IF (T == 'A' .AND. ID == "DIM") THEN
+  CALL NEXT()
+  CALL NEXT()
+  IF (T /= '(') THEN
+   PRINT*, "#!? Invalid dimension, expected LPAREN ('(')", L, C
+   CALL EXIT(1)
+  END IF
+
+  CALL EXPR()
+  CALL POPINT(A)
+  ! save base (also save size) and init
+  B = SP
+  CALL PUSH(A, T_INT)
+  DO ITR=0, A
+   CALL PUSH(0, T_INT)
+  END DO
+  CALL PUSH(B, T_ARR)
+  CALL NEXT()
+  IF (T /= ')') THEN
+   PRINT*, "#!? Invalid dimension, expected RPAREN (')')", L, C
+   CALL EXIT(1)
+  END IF
+ ELSE IF (T == 'A') THEN
+  CALL NEXT()
+  V = FIND(ID)
+  IF (V == 0) THEN
+   PRINT*, "#!? Identifier does not exist", L, C, ID
+   CALL EXIT(1)
+  END IF
+  CALL PUSH(VARVALUE(V), VARTYPE(V))
+ ELSE
+  PRINT*,"#!? Expected Primary", L, C, ICHAR(T)
+  PRINT*,S(L)
+  CALL EXIT(1)
+ END IF
+END SUBROUTINE EXPRP
+
+SUBROUTINE EXPRS()
+ INTEGER :: BASE
+ INTEGER :: OFFSET
+ INTEGER :: LNGTH
+ CALL PEEK()
+ IF (T == '(') THEN
+  CALL NEXT()
+  CALL POPARR(BASE)
+  CALL EXPR()
+  CALL POPINT(OFFSET)
+  CALL NEXT()
+  IF (T /= ')') THEN
+   PRINT*, "#!? Invalid access, expected RPAREN (')')", L, C
+   CALL EXIT(1)
+  END IF
+
+  IF (STACKTYPE(BASE) /= T_INT) THEN
+   PRINT*, "#!? Invalid array", L, C
+   CALL EXIT(1)
+  END IF
+
+  LNGTH = STACK(BASE)
+  IF (OFFSET >= LNGTH) THEN
+   PRINT*, "#!? Out of bounds access", L, C
+   CALL EXIT(1)
+  END IF
+
+  CALL PUSH(STACK(BASE+OFFSET+1), STACKTYPE(BASE+OFFSET+1))
+ END IF
+END SUBROUTINE EXPRS
+
+SUBROUTINE EXPRPR()
+ LOGICAL :: DONE
+ INTEGER :: L
+ DONE = .FALSE.
+ CALL PEEK()
+ DO WHILE (T == '-')
+  CALL NEXT()
+  CALL EXPRP()
+  CALL POPINT(L)
+  CALL PUSH(0-L, T_INT)
+  DONE = .TRUE.
+ END DO
+
+ IF (DONE .eqv. .FALSE.) CALL EXPRP()
+
+ CALL EXPRS
+END SUBROUTINE EXPRPR
+
+! *//
+SUBROUTINE EXPRM()
+ INTEGER :: L,R
+ CHARACTER :: TY
+ CALL EXPRPR()
+ CALL PEEK()
+ DO WHILE (T == '*' .OR. T == '/')
+  TY=T
+  CALL NEXT()
+  CALL EXPRPR()
+  CALL POPINT(R)
+  CALL POPINT(L)
+  IF (TY == '*') CALL PUSH(L*R, T_INT)
+  IF (TY == '/') CALL PUSH(L/R, T_INT)
+ END DO
+END SUBROUTINE EXPRM
+
+! +/-
+SUBROUTINE EXPRA()
+ INTEGER :: L,R
+ CHARACTER :: TY
+ CALL EXPRM()
+ CALL PEEK()
+ DO WHILE (T == '+' .OR. T == '-')
+  TY = T
+  CALL NEXT()
+  CALL EXPRM()
+  CALL POPINT(R)
+  CALL POPINT(L)
+  IF (TY == '+') CALL PUSH(L+R, T_INT)
+  IF (TY == '-') CALL PUSH(L-R, T_INT)
+ END DO
+END SUBROUTINE EXPRA
+
+! AND/OR
+SUBROUTINE EXPR()
+ INTEGER :: L,R
+ INTEGER :: TY
+ CALL EXPRA()
+ CALL PEEK()
+ DO WHILE (T == 'A' .AND. (ID == 'AND' .OR. ID == "OR"))
+  TY = (ID == 'AND')
+  CALL NEXT()
+  CALL EXPRA()
+  CALL POPINT(R)
+  CALL POPINT(L)
+  IF (TY == 1) CALL PUSH(MERGE(1, 0, (L/=0).AND.(R/=0)), T_INT)
+  IF (TY == 0) CALL PUSH(MERGE(1, 0, (L/=0).OR.(R/=0)), T_INT)
+ END DO
+END SUBROUTINE EXPR
+
+SUBROUTINE STMT()
+ INTEGER :: TOP
+ CHARACTER(LEN=32) :: NAME
+ INTEGER :: LNGTH,V,A,ITR
+ CALL PEEK()
+ IF (T == ACHAR(0)) THEN
+  RETURN
+ ELSE IF (T == 'A' .AND. ID == "IF") THEN
+  CALL NEXT()
+  CALL EXPR()
+  CALL POPINT(A)
+  CALL NEXT()
+  IF (T == 'A' .AND. ID == "GOTO") THEN
+   CALL NEXT()
+   IF (T == '0' .AND. A > 0) THEN
+    C=1
+    L=N
+   ELSE IF (T /= '0') THEN
+    PRINT*, "#!? Non integer provided for goto statement", L, C
+    CALL EXIT(1)
+   END IF
+  ELSE
+   PRINT*, "#!? No goto statement provided for conditional", L, C
+   CALL EXIT(1)
+  END IF
+ ELSE IF (T == 'A' .AND. ID == "RETURN") THEN
+  CALL NEXT()
+  CALL POPINT(L)
+  CALL POPINT(C)
+ ELSE IF (T == 'A' .AND. ID == "CALL") THEN
+  CALL NEXT()
+  CALL NEXT()
+  IF (T == '0') THEN
+   CALL PUSH(C, T_INT)
+   CALL PUSH(L, T_INT)
+   C=1
+   L=N
+  ELSE
+   PRINT*, "#!? Non integer provided for goto statement", L, C
+   CALL EXIT(1)
+  END IF
+ ELSE IF (T == 'A' .AND. ID == "GOTO") THEN
+  CALL NEXT()
+  CALL NEXT()
+  IF (T == '0') THEN
+   C=1
+   L=N
+  ELSE
+   PRINT*, "#!? Non integer provided for goto statement", L, C
+   CALL EXIT(1)
+  END IF
+ ELSE IF (T == 'A' .AND. ID == "PRINT") THEN
+  CALL NEXT()
+  CALL EXPR()
+  CALL POP(TOP,ITR)
+  IF (ITR == T_INT) THEN
+   PRINT*,TOP
+  ELSE IF (ITR == T_ARR) THEN
+   LNGTH = STACK(TOP)
+   PRINT*,"L=",LNGTH
+   DO ITR=TOP+1, TOP+LNGTH
+    IF (STACKTYPE(ITR) == T_ARR) THEN
+     PRINT*, "(ARRAY)"
+    ELSE
+     PRINT*, STACK(ITR)
+    END IF
+   END DO
+  END IF
+ ELSE IF (T == 'A' .AND. ID == "LET") THEN
+  CALL NEXT()
+  CALL NEXT()
+  IF (T /= 'A') THEN
+   PRINT*, "#!? Invalid Assignment", L, C
+   CALL EXIT(1)
+  END IF
+
+  NAME = ID
+  LNGTH= LE
+  
+  CALL NEXT()
+  IF (T == '(') THEN
+   CALL EXPR()
+   CALL POPINT(ITR)
+   CALL NEXT()
+   IF (T /= ')') THEN
+    PRINT*, "#!? Invalid Assignment of array, expected closing RPAREN (')')", L, C
+    CALL EXIT(1)
+   END IF
+   CALL NEXT()
+   IF (T /= '=') THEN
+    PRINT*, "#!? Invalid Assignment of array, expected EQUALS sign ('=')", L, C
+    CALL EXIT(1)
+   END IF
+   V = FIND(NAME)
+   IF (V == 0) THEN
+    PRINT*, "#!? Undeclared array", L, C, NAME
+    CALL EXIT(1)
+   ELSE IF (VARTYPE(V) /= T_ARR) THEN
+    PRINT*, "#!? Attempted array assignment on non array", L, C, NAME
+    CALL EXIT(1)
+   ELSE IF (ITR >= STACK(VARVALUE(V))) THEN
+    PRINT*, "#!? Out of bounds assignment on array", L, C, NAME
+    CALL EXIT(1)
+   END IF
+   CALL EXPR()
+   CALL POP(STACK(VARVALUE(V)+ITR+1),STACKTYPE(VARVALUE(V)+ITR+1))
+  ELSE IF (T == '=') THEN
+   V = FIND(NAME)
+   IF (V == 0) THEN
+    CALL ADDVAR(NAME)
+    ! PRINT*, "#!? Undeclared identifier", L, C, NAME
+    ! CALL EXIT(1)
+   END IF
+   V = FIND(NAME)
+   CALL EXPR()
+   CALL POP(VARVALUE(V), VARTYPE(V))
+  ELSE
+   PRINT*, "#!? Invalid Assignment, expected EQUALS sign or LPAREN ('=','(')", L, C
+   CALL EXIT(1)
+  END IF
+
+ ELSE
+  CALL EXPR()
+ END IF
+END SUBROUTINE STMT
+
+! HELPER
+
+SUBROUTINE ADDVAR(ID)
+ CHARACTER(LEN=32) :: ID
+ IF (NVAR > 256) THEN
+  PRINT*, "#!? Could not create variable, ran out of space", L, C
+  CALL EXIT(1)
+ END IF
+
+ NVAR           = NVAR + 1
+ VARNAME(NVAR)  = ID
+ VARVALUE(NVAR) = 0
+ VARTYPE(NVAR)  = T_INT
+END SUBROUTINE ADDVAR
+
+FUNCTION FIND(ID) RESULT(I)
+ CHARACTER(LEN=*), INTENT(IN) :: ID
+ INTEGER :: I
+ DO I = 1, NVAR
+   IF (VARNAME(I) == ID) RETURN
+ END DO
+ I = 0
+END FUNCTION
+
+SUBROUTINE LOADFILE(F,I,S)
+ INTEGER :: F, I, H
+ CHARACTER(LEN=32) :: S(8192)
+ S=ACHAR(0)
+ DO
+  READ(F, "(A)", IOSTAT=H) S(I)
+  IF (H /= 0) EXIT
+  I=I+1
+ END DO
+END SUBROUTINE LOADFILE
+
+END PROGRAM MAIN
+

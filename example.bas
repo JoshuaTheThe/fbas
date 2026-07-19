@@ -1,0 +1,5 @@
+
+LET X = DIM(4)
+LET X(1) = 255
+PRINT X
+
