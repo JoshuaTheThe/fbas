@@ -9,6 +9,19 @@
  - `sudo apt install gfortran`
 2. gfortran fbas.f90 -o fbas -g -std=legacy
 
+# How to Use
+- ./fbas
+
+ The interpreter reads<br>
+ from the standard input;
+
+ So you can either enter-<br>
+ your program, and begin via<br>
+ CTRL+D,<br>
+
+ Or you can use a LINUX redirect<br>
+ - ./fbas \< /path/to/source.bas 
+
 # features
 1. LET creation, assignment and array assignment
 
