@@ -2,6 +2,7 @@
 # BASIC Language interpreter
 - written in FORTRAN/90
 - NO AI USED OR ALLOWED
+- i did this to learn fortran
 
 # How To Compile
 1. install gfortran
